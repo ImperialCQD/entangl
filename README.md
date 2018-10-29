@@ -17,23 +17,12 @@ with python 3
 
 
 ## Overview
-entangl provides to generate and 
+`entanglement/` folder contains the core functions. it is split in `data/`
+(how to generatte training / testing data) and `utility/` which contains 
+functions to deal with quantum states (i.e. generation of quantum states, 
+projective masurements, entanglement computation, etc..)
+
+`dataset/` contains dataset used for training of the ANNs
 
 
-`utility/` folder contains the main functions: 
-qm.py should contain the relevant functions to simulate quantum mechanics 
-(i.e. generation of quantum states, projective masurements, entanglement 
-computation)
-
-datagen.py encompasses tools to generate training/testing data
-
-ann.py helper for the construction of artificial neural networks
-
-`examples/`
-
-There are a couple of examples in the `examples/` folder, and there is more help
-available in the docstrings of the code.  Try calling `help()` on classes and
-functions to find out more.
-
-
-`dataset/` is intended to be the storage place for small dataset used in the examples
+`test/` containsthe testing scripts
