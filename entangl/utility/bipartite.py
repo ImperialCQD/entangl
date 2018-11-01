@@ -22,6 +22,10 @@ Conventions
 + Pauli matrices
   X =  0  1  //  Y = 0 -i  //  Z = 1  0
        1  0          i  0          0 -1
+d: refers to the dimension of the hilbert space
+
+Caredull with the dimensions and shapes
+
 """
 import numpy as np
 from scipy import linalg, stats, optimize
@@ -29,19 +33,20 @@ from scipy import linalg, stats, optimize
 
 
 # ===================================================================================== #
-# Manipulation of pure bi-partite states (some times it's more general)
-# 
-# 
+# Manipulation of pure bi-partite states (sometimes slightly more general)
 # ===================================================================================== #
 qb_0 = np.array([1., 0], dtype='complex128')
 qb_1 = np.array([0, 1.], dtype='complex128')
+qb_basis = np.stack([qb_0, qb_1], 1)
 qbs_00 = np.kron(qb_0, qb_0)
 qbs_01 = np.kron(qb_0, qb_1)
 qbs_10 = np.kron(qb_1, qb_0)
 qbs_11 = np.kron(qb_1, qb_1)
+# Maybe change the convention such that it matches the convention for the qubits
+# representation
 X = np.array([[0, 1.], [1., 0]], dtype='complex128') 
-Y = np.array([[0, -1.j], [1., 0]], dtype='complex128') 
-Z = np.array([[0, 1.], [1. ,0]], dtype='complex128')  
+Y = np.array([[0, -1.j], [1.j, 0]], dtype='complex128') 
+Z = np.array([[1., 0], [0 ,-1]], dtype='complex128')  
 I = np.array([[1., 0], [0 ,1.]], dtype='complex128')
 bell0 = 1/np.sqrt(2) * np.array([1., 0, 0, 1.], dtype='complex128')
 bell1 = 1/np.sqrt(2) * np.array([1., 0, 0, -1.], dtype='complex128')
@@ -56,30 +61,44 @@ def state_to_dm(states):
     ---------
     state_vectors: numy 
         1d shape = (4) single state
-        3d shape = (nb_states, 4)
+        3d shape = (nb_states, 4)        
     """
-    n_dim = np.ndim(rho)
+    n_dim = np.ndim(states)
     if(n_dim == 2):   
-        ket = states.reshape((len(state_vectors), 4, 1))
-        bra = np.conjugate(states.reshape((len(states), 1, 4)))
+        ket = np.reshape(states, (len(states), 4, 1))
+        bra = np.conjugate(np.reshape(states, (len(states), 1, 4)))
     elif(n_dim == 1):
-        ket = states.reshape(4, 1)
-        bra = np.conjugate(states.reshape(1, 4))
+        ket = np.reshape(states, (4, 1))
+        bra = np.conjugate(np.reshape(states, (1, 4)))
     rho = ket * bra
     return rho    
 
 def ip(state0, state1):
-    """ Inner product between two states (or list) <state0 | state1>"""
-    if(np.ndim(state0) == 1):
-        ip = np.dot(np.conjugate(state0), state1)
-    if(np.ndim(state0) == 2):
-        ip = np.sun(np.conjugate(state0) * state1, 1)
-    return ip
+    """ Inner product between two states (or list)
+    
+    Arguments
+    ---------
+    state: np.array
+        1d shape (d) i.e. only one state
+        2d shape (n_states, d)
+    
+    Output
+    ------
+        2-d np.array with dimension (nb_states0, nb_states_1)
+    """
+    state0 = state0[np.newaxis, :] if np.ndim(state0) == 1 else state0
+    state1 = state1[np.newaxis, :] if np.ndim(state1) == 1 else state1
+    return np.dot(np.conjugate(state0), np.transpose(state1))
+
+def ip_square(state0, state1):
+    """ square module of the inner product 
+        Same output dimensions as teh output of ip()"""
+    return np.square(np.abs(ip(state0, state1)))
 
 def norm(states):
-    """ Norm of state (or collection of states)"""
+    """ Norm of state (or collection of states)
+    Same output dimensions as teh output of ip()"""
     return np.sqrt(np.real(ip(states, states)))
-
 
 def partial_trace(rho, subsystem='A'):
     """ Compute the partial trace of a bipartite system. It relies
@@ -94,22 +113,21 @@ def partial_trace(rho, subsystem='A'):
     """
     n_dim = np.ndim(rho)
     if(n_dim == 3):   
-        rho_rshp = rho.reshape([len(rho), 2, 2, 2, 2])
+        rho_rshp = np.reshape(rho, (len(rho), 2, 2, 2, 2))
         if(subsystem == 'A'):
             rho_partial = np.einsum('aijik->ajk', rho_rshp)
         else:
             rho_partial = np.einsum('aijkj->aik', rho_rshp)        
     elif(n_dim == 2):
-        rho_rshp = rho.reshape([2, 2, 2, 2])
+        rho_rshp = np.reshape(rho, (2, 2, 2, 2))
         if(subsystem == 'A'):
             rho_partial = np.einsum('ijik->jk', rho_rshp)
         else:
             rho_partial = np.einsum('ijkj->ik', rho_rshp)        
     return np.array(rho_partial);
 
-
-def measurements(states, nb_measures, n = [1,0,0], system = 'A'):
-    """simulates projective measurements on one of the subsystem.
+def meas_one_sub(states, nb_measures=np.inf, n = [1,0,0], subsystem = 'A'):
+    """simulates projective measurements on only one of the subsystem.
     Works only for two-qubits states
     
     Arguments
@@ -118,82 +136,94 @@ def measurements(states, nb_measures, n = [1,0,0], system = 'A'):
          a list of state vectors
     nb_measures: int
         number of measurements to perform
+        by default infinity, i.e. return the true expectation value of the 
+        operator, else if it is a finite number will return empirical value
     n: list<int>
         Encode the mesurement hermitian operator 
         [a, b, c] -> O = aX + bY + cZ
-    system: <str>
-        'A' or 'B' on which system do we perform the measurement
+    subsystem: <str>
+        'A' or 'B' on which subsystem do we perform the measurement
 
     Output
     ------
-
-    TODO: Probably could be simplified
-    TODO: When nb.measures = np.inf return expectation
+        res 1d np.array with the same length as states
+        Estimation of the expected value <O>
     """
     O =  n[0] * X + n[1] * Y + n[2] * Z
     eigenvals, eigenvecs = np.linalg.eig(O)
-    probs = np.array([e * proba_one_subsystem(states, system) for e in np.transpose(eigenvecs)])
-    assert np.allclose(np.sum(probs, 1), 1.)
+    assert _is_real_enough(eigenvals), "O has complex (i.e not real) eigenvalues"
+    eigenvals = np.real(eigenvals)
+    if(subsystem == 'A'):
+        proj_basis = [np.stack([np.kron(e, qb_0), np.kron(e, qb_1)]) for e in 
+                     np.transpose(eigenvecs)]    
+    else:
+        proj_basis = [np.stack([np.kron(qb_0, e), np.kron(qb_1, e)]) for e in 
+             np.transpose(eigenvecs)]    
+    
+    probs = proj_proba(states, basis = proj_basis)
+    assert np.allclose(np.sum(probs, 1), 1.), "Measurement probas don't sum to 1"
     if(nb_measures == np.inf):
-        res = np.matmul(probs, eigenvals)
+        res = np.dot(probs, eigenvals)
     else:
         freq = np.random.binomial(nb_measures, probs[:,0]) / nb_measures
         res = eigenvals[0] * freq + eigenvals[1] * (1-freq) 
     return res
 
 
-def proba_one_subsystem(states, system = 'A'):
-    """ proba of a bipartite state to be projected on the 
-    computational basis on one of the system. Relies on the
-    conventions used. Only work for two-qubits states
-    E.g. two qubit states -> probas of the first(second) qubit
-    to be observed in 0 or 1
+def proj_proba(states, basis = None):
+    """ proba of being projected on a list of vectors (subspaces)
 
     Arguments
     ---------
-        states: nb-array
-            shape = (2)
-            shape = (nb_states, 2)
-        system: str
-            Which subsystem are we observing 
+        states: np.array
+            1d shape = (d)
+            2d shape = (nb_states, d)
+        basis: list
+            In which basis do we perofrm the measurements. 
+            basis[i] is a np.array 
+                1d shape = (d) specify the projection onto a vector
+                2d shape = (n_sub, d) specify the projection onto a subspace
+            By default if the basis is not specified it will be the 
+            computational basis
 
     Output
     ------
-        proba: np.array 
-            shape = (nb_states,2) if 2-d input
-            shape = (2) if 1-d input
+        probs: np.array 
+            shape = (nb_states,nb_subspaces_proj)
             where proba[n, i] is the proba of the n-th state 
             to be projected on the i-th basis vector
     """
-    states = states[np.newaxis, :] if np.ndim(states) == 1          
-    if(system == 'A'):
-        p = np.array(states[:, 0] + states[:, 1], states[:, 2] + states[:, 3])
-    else(system == 'B'):
-        p = np.array(states[:, 0] + states[:, 2], states[:, 1] + states[:, 3])
-    return np.squeeze(p)
+    states = np.array(states)[np.newaxis, :] if np.ndim(states) == 1 else np.array(states)
+    dim_H = states.shape[1]
+    basis = np.eye(dim_H) if basis is None else basis
+    probs = [np.sum(ip_square(states, b), 1) for b in basis]
+    return np.transpose(probs)
 
+def samples_from_proba(probs, nb_samples):
+    """ to do later"""
+    pass
 
 # ===================================================================================== #
 # Entanglement 
 # Mostly based on the Von Newman Entropy of the partial trace of a density matrix
 # It could be extended to incorporate other measures
 # ===================================================================================== #
-def entangl_of_states(states, system = 'A'):
+def entangl_of_states(states, subsystem = 'A'):
     """ get a measure of entanglement (based on the Von Newman entropy of 
     the partial trace) of a list of states.
+    For entangled (separable) verify it retuns log(2) (0)
     
     Arguments
     ---------
     states: nd-array
         shape = ()
         shape = ()
-    system: str
+    subsystem: str
         On which subsystem do we trace out
 
-    TODO: it should return the same result whatever the subsystem is
-    TODO: for entangled (separable) verify it retuns log(2) (0)
+    TODO: verif that it returns the same result whatever the subsystem is
     """
-    return vne_of_dm(partial_trace(state_to_dm(states), system = system))
+    return vne_of_dm(partial_trace(state_to_dm(states), subsystem = subsystem))
 
 def vne_of_dm(rhos):
     """ Von Newman entropy of a list of density matrices
@@ -206,11 +236,13 @@ def vne_of_dm(rhos):
         shape = (d,d) one density matrix (d is the dim of the Hilbert space)
         shape = (nb_rho, d, d) collection of density matrices
     """
-    if np.ndim(rhos):
+    if np.ndim(rhos) == 2:
         e = linalg.eigvals(rhos)
+        assert _is_real_enough(e), "Imaginary values of the eigenvalues are not null"
+        e = np.real(e)
         vn_entrop = - np.dot(e[e!=0], np.log(e[e!=0]))
     elif(np.ndim(rhos) == 3):
-        vn_entrop = np.array([vne_of_dm(r) for r in rho])
+        vn_entrop = np.array([vne_of_dm(r) for r in rhos])
     return vn_entrop
     
 def concurrence(psi): 
@@ -243,7 +275,7 @@ def grid_lambda_gen(res):
     """
     ent_space = np.linspace(0, np.log(2),res)
     np.random.shuffle(ent_space)
-    la = [vne_to_lambda(v) for v in vne]
+    la = [ent_to_lambda(v) for v in ent_space]
     la = np.clip(la, 0, 1)
     return la
 
@@ -253,14 +285,21 @@ def rdm_lambda_gen(nb):
     vne = - [la * log(la) + (1 - la) * log(1 - la)] 
     """
     vne = np.log(2) * np.random.random(nb)
-    la = [vne_to_lambda(v) for v in vne]
+    la = [ent_to_lambda(v) for v in vne]
     la = np.clip(la, 0, 1)
     return la 
 
-def ent_to_lambda(vne):
+def ent_to_lambda(ent):
     """ invert (numerically) lambda_to_vne """ 
-    func_root = lambda la: lambda_to_vne(la) - ent
-    lambd = optimize.newton(func_root, 0.25)
+    if(np.ndim(ent) == 0):
+        if(ent == 0):
+            lambd = 0
+        else:
+            func_root = lambda la: lambda_to_ent(la) - ent
+            lambd = optimize.newton(func_root, 10e-12)
+    else:
+        tmp = [ent_to_lambda(e) for e in np.nditer(ent)]
+        lambd = np.reshape(tmp, np.shape(ent))
     return lambd
 
 def lambda_to_ent(la):
@@ -268,22 +307,29 @@ def lambda_to_ent(la):
     ent = - [la * log(la) + (1 - la) * log(1 - la)]
     where la (lambda) is the Schmidt coefficient
     """
-    return - np.nan_to_num((1-la)*np.log(1-la) - la*np.log(la))
+    return - np.nan_to_num((1-la)*np.log(1-la) + la*np.log(la))
 
-def rdm_states_from_lambda(lamb = 0.5):
+def rdm_states_from_lambda(lambdas):
     """ For a collection of lambdas generate a collection of 
-    random states
+    random states. Build based on the Schmidt decomposition
+    of a pure bipartite state:
+    |psi> = sqrt(lambda) |i_A>|i_B> + sqrt(1 - lambda) |j_A>|j_B>
+    where {|i_A>, |i_B>} ({|j_A>, |j_B>}) are a basis of the system A (B)
     """
-    basis_A = gen_rdm_states(nb_states, 2)
-    basis_B = gen_rdm_states(nb_states, 2)
-    vect = np.kron(np.sqrt(lamb) * basis_A, np.sqrt(1 - lamb) * basis_B)
-    return vect
+    nb_states = 1 if np.ndim(lambdas) == 0  else len(lambdas)
+    basis_A = gen_rdm_basis(nb_states, 2)
+    basis_B = gen_rdm_basis(nb_states, 2)
+    if(nb_states > 1):
+        states = [np.sqrt(l) * np.kron(i_A[:,0], i_B[:,0]) + np.sqrt(1 - l) * np.kron(i_A[:,1], i_B[:,1]) 
+            for l, i_A, i_B in zip(lambdas, basis_A, basis_B)]
+    else:
+        states = np.sqrt(lambdas) * np.kron(basis_A[:,0], basis_B[:,0]) 
+        states += np.sqrt(1 - lambdas) * np.kron(basis_A[:,1], basis_B[:,1])
+    return states
 
-def gen_rdm_states(nb, dim):
-    """ Generate random states. Based on the generation of random
+def gen_rdm_basis(nb, dim):
+    """ Generate a random basis. Based on the generation of random
     unitaries U(N) from scipy.stats.unitary_group.rvs.
-    state = U x |i> ehere U is the random unitary and i is a fixed 
-    basis vector
 
     Argument
     --------
@@ -291,25 +337,83 @@ def gen_rdm_states(nb, dim):
             number of states to generate
         dim: int
             dimension of the Hilbert space
+    Output
+    ------
+        2d or 3-d np.array
+        shape = ((nb), dim, dim)
+        where output[(n), :, i] is the i-th state of the n-th basis 
     """
     u = stats.unitary_group.rvs(dim, size=nb)
-    one = np.zeros((nb, dim, 1))
-    one[:,-1,:] = 1
-    return np.matmul(u, one)
+    return u
+
+def _is_real_enough(e):
+    """ test if the imaginary part is null (or really close to 0)"""
+    return np.allclose(np.imag(e), 0.)
+    
 
 if __name__ == '__main__':
 	# For sake of convenience some testing are done here
-	# should be moved somewhere else
-	test_random_states = False
-	test_vne = False
-    test_vne_to 
-
+	# should be moved somewhere else later on
+    test_entanglement = False
+    test_measurements = False
+    test_gen_rdm_states = False
+    test_ent_to_lambdas = False
+    states_test = [qbs_00, bell0]    
+    
+    if(test_entanglement):
+        # Verify we find the expected values for two known states
+        # qbs_00 is a pure separable state (i.e. entanglement should be 0), 
+        # while bell0 is a maximally entangled pure state (i.e. entanglement 
+        # should be log(2))
+        print("Entanglement of |00> and (|00> + |11>)/sqrt(2):")
+        entangl_of_states(states_test)
 	
+    if(test_measurements):
+        # Infinite number of measurements (i.e. perfect measurement)
+        print("Perfect measurements of |00>, Bell0 in the X basis")
+        print(meas_one_sub(states_test, np.inf, [1, 0, 0]))
+        print("Perfect measurements of |00>, Bell0 in the Y basis")
+        print(meas_one_sub(states_test, np.inf, [0, 1, 0]))
+        print("Perfect measurements of |00>, Bell0 in the Z basis")
+        print(meas_one_sub(states_test, np.inf, [0, 0, 1]))
+        
+        # One measurement 
+        print("1 measurement of |00>, Bell0 in the X basis")
+        print(meas_one_sub(states_test, 1, [1, 0, 0]))
+        print("1 measurement of |00>, Bell0 in the Y basis")
+        print(meas_one_sub(states_test, 1, [0, 1, 0]))
+        print("1 measurement of |00>, Bell0 in the Z basis")
+        print(meas_one_sub(states_test, 1, [0, 0, 1]))
     
+        # Ten measurement 
+        print("10 measurement of |00>, Bell0 in the X basis")
+        print(meas_one_sub(states_test, 10, [1, 0, 0]))
+        print("10 measurement of |00>, Bell0 in the Y basis")
+        print(meas_one_sub(states_test, 10, [0, 1, 0]))
+        print("10 measurement of |00>, Bell0 in the Z basis")
+        print(meas_one_sub(states_test, 10, [0, 0, 1]))
+        
+        # Ten thousands measurements (should be really close to the real values)
+        print("10000 measurement of |00>, Bell0 in the X basis")
+        print(meas_one_sub(states_test, 10000, [1, 0, 0]))
+        print("10000 measurement of |00>, Bell0 in the Y basis")
+        print(meas_one_sub(states_test, 10000, [0, 1, 0]))
+        print("10000 measurement of |00>, Bell0 in the Z basis")
+        print(meas_one_sub(states_test, 10000, [0, 0, 1]))
     
+    if(test_ent_to_lambdas):
+        # Test of going back and forth between lambdas and entanglements
+        ent_test =  np.random.uniform(0, np.log(2), 1000)
+        l_test = ent_to_lambda(ent_test)
+        ent_final = lambda_to_ent(l_test)
+        assert np.allclose(ent_test, ent_final), "Problem in test_ent_to_lambdas "
     
-    
-    
+    if(test_gen_rdm_states):
+        ent_test = np.random.uniform(0, np.log(2), 100)
+        l_test = ent_to_lambda(ent_test)
+        states = rdm_states_from_lambda(l_test)
+        ent_final = entangl_of_states(states)
+        assert np.allclose(ent_test, ent_final), "Problem in test_random_states "
     
     
     
