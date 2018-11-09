@@ -13,17 +13,16 @@ import matplotlib.pylab as plt
 from keras.models import Sequential
 from keras.layers import Dense, Activation, Dropout
 from entangl.data import data_bipartite as data
-
+from entangl.utility import bipartite as bp
 
 ## Getting the data
-(x_train, y_train, st_train), (x_test, y_test, st_test) = data.load_data_set('perfect_10k2k', states = True)
+(x_train, y_train, st_train), (x_test, y_test, st_test) = data.load_data_set('../dataset/perfect_10k2k', states = True)
 x_train = x_train[:, :3]
 x_test = x_test[:, :3]
 y_train /= np.log(2) 
 y_test /= np.log(2) 
 plt.hist(y_train)
 plt.hist(y_test)
-
 
 ##Defining the ANN
 batch_size = 100
@@ -61,12 +60,19 @@ evaluation = model.evaluate(x_test, y_test)
 print("On test data [mse, mae]:")
 print(evaluation)
 
+## Verif look at two qubits we know
+st_verif = [bp.bell0, bp.qbs_00]
+x_verif_xA = bp.meas_one_sub(st_verif, np.inf, [1,0,0], 'A')
+x_verif_yA = bp.meas_one_sub(st_verif, np.inf, [0,1,0], 'A')
+x_verif_zA = bp.meas_one_sub(st_verif, np.inf, [0,0,1], 'A')
+x_verif = np.c_[x_verif_xA, x_verif_yA, x_verif_zA]
+model.predict(x_verif)
 
 ## Visualization 
 # 1: mae errors; 
 # 2: hist of mae
 # 3 & 4: weights of layer 1 visualized 
-y_pred = np.squeeze(model.predict(x_test))   
+y_pred = np.clip(np.squeeze(model.predict(x_test)),0,1)   
 err = np.abs(y_pred - y_test)
 err_avg = np.average(err)
 err_std = np.std(err)
