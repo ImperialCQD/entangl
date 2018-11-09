@@ -17,12 +17,13 @@ with python 3
 
 
 ## Overview
-`entanglement/` folder contains the core functions. it is split in `data/`
+`entangl/` folder contains the core functions. it is split in `data/`
 (how to generatte training / testing data) and `utility/` which contains 
 functions to deal with quantum states (i.e. generation of quantum states, 
 projective masurements, entanglement computation, etc..)
 
 `dataset/` contains dataset used for training of the ANNs
 
+`test/` contains some testing scripts
 
-`test/` containsthe testing scripts
+`training/` contains some training scripts
